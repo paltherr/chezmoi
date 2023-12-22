@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/twpayne/chezmoi/v2/internal/chezmoi"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
 )
 
 type statusCmdConfig struct {
@@ -56,12 +57,15 @@ func (c *Config) runStatusCmd(cmd *cobra.Command, args []string) error {
 	preApplyFunc := func(
 		targetRelPath chezmoi.RelPath, targetEntryState, lastWrittenEntryState, actualEntryState *chezmoi.EntryState,
 	) error {
+		c.logger.Info("statusPreApplyFunc", chezmoilog.Stringer("targetRelPath", targetRelPath))
+		/* FIXME add the following
 		c.logger.Info().
 			Stringer("targetRelPath", targetRelPath).
 			Object("targetEntryState", targetEntryState).
 			Object("lastWrittenEntryState", lastWrittenEntryState).
 			Object("actualEntryState", actualEntryState).
 			Msg("statusPreApplyFunc")
+		*/
 
 		var (
 			x = ' '

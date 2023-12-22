@@ -33,8 +33,6 @@ import (
 	"github.com/gregjones/httpcache/diskcache"
 	"github.com/mitchellh/mapstructure"
 	"github.com/muesli/termenv"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/twpayne/go-shell"
@@ -43,6 +41,7 @@ import (
 	cobracompletefig "github.com/withfig/autocomplete-tools/integrations/cobra"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
+	"golang.org/x/exp/slog"
 	"golang.org/x/term"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
@@ -223,7 +222,7 @@ type Config struct {
 	destSystem           chezmoi.System
 	persistentState      chezmoi.PersistentState
 	httpClient           *http.Client
-	logger               *zerolog.Logger
+	logger               *slog.Logger
 
 	// Computed configuration.
 	commandDirAbsPath   chezmoi.AbsPath
@@ -512,9 +511,7 @@ func (c *Config) Close() error {
 	errs := make([]error, 0, len(c.tempDirs))
 	for _, tempDirAbsPath := range c.tempDirs {
 		err := os.RemoveAll(tempDirAbsPath.String())
-		c.logger.Err(err).
-			Stringer("tempDir", tempDirAbsPath).
-			Msg("RemoveAll")
+		c.logger.Error("RemoveAll", "tempDir", tempDirAbsPath)
 		errs = append(errs, err)
 	}
 	pprof.StopCPUProfile()
@@ -956,12 +953,12 @@ func (c *Config) defaultPreApplyFunc(
 	targetRelPath chezmoi.RelPath,
 	targetEntryState, lastWrittenEntryState, actualEntryState *chezmoi.EntryState,
 ) error {
-	c.logger.Info().
-		Stringer("targetRelPath", targetRelPath).
-		Object("targetEntryState", targetEntryState).
-		Object("lastWrittenEntryState", lastWrittenEntryState).
-		Object("actualEntryState", actualEntryState).
-		Msg("defaultPreApplyFunc")
+	c.logger.Info("defaultPreApplyFunc",
+		slog.Any("targetRelPath", targetRelPath),
+		slog.Any("targetEntryState", targetEntryState),
+		slog.Any("lastWrittenEntryState", lastWrittenEntryState),
+		slog.Any("actualEntryState", actualEntryState),
+	)
 
 	switch {
 	case c.force:
@@ -1747,7 +1744,7 @@ func (c *Config) newSourceState(
 		return nil, err
 	}
 
-	sourceStateLogger := c.logger.With().Str(logComponentKey, logComponentValueSourceState).Logger()
+	sourceStateLogger := c.logger.With(logComponentKey, logComponentValueSourceState)
 
 	c.SourceDirAbsPath, err = c.getSourceDirAbsPath(nil)
 	if err != nil {
@@ -1768,7 +1765,7 @@ func (c *Config) newSourceState(
 		chezmoi.WithEncryption(c.encryption),
 		chezmoi.WithHTTPClient(httpClient),
 		chezmoi.WithInterpreters(c.Interpreters),
-		chezmoi.WithLogger(&sourceStateLogger),
+		chezmoi.WithLogger(sourceStateLogger),
 		chezmoi.WithMode(c.Mode),
 		chezmoi.WithPriorityTemplateData(c.Data),
 		chezmoi.WithSourceDir(c.SourceDirAbsPath),
@@ -1956,34 +1953,30 @@ func (c *Config) persistentPreRunRootE(cmd *cobra.Command, args []string) error 
 	}
 
 	// Configure the logger.
-	log.Logger = log.Output(zerolog.NewConsoleWriter(
-		func(w *zerolog.ConsoleWriter) {
-			w.Out = c.stderr
-			w.NoColor = !c.Color.Value(c.colorAutoFunc)
-			w.TimeFormat = time.RFC3339
-		},
-	))
+	var handler slog.Handler
 	if c.debug {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		handler = slog.NewTextHandler(c.stderr, nil)
 	} else {
-		zerolog.SetGlobalLevel(zerolog.Disabled)
+		handler = chezmoilog.NullHandler{}
 	}
-	c.logger = &log.Logger
+	c.logger = slog.New(handler)
+	slog.SetDefault(c.logger)
 
 	// Log basic information.
-	c.logger.Info().
-		Object("version", c.versionInfo).
-		Strs("args", os.Args).
-		Str("goVersion", runtime.Version()).
-		Msg("persistentPreRunRootE")
+	c.logger.Info("persistentPreRunRootE",
+		slog.Any("version", c.versionInfo),
+		slog.Any("args", os.Args),
+		slog.String("goVersion", runtime.Version()),
+	)
 	realSystem := chezmoi.NewRealSystem(c.fileSystem,
 		chezmoi.RealSystemWithSafe(c.Safe),
 		chezmoi.RealSystemWithScriptTempDir(c.ScriptTempDir),
 	)
 	c.baseSystem = realSystem
 	if c.debug {
-		systemLogger := c.logger.With().Str(logComponentKey, logComponentValueSystem).Logger()
-		c.baseSystem = chezmoi.NewDebugSystem(c.baseSystem, &systemLogger)
+		systemHandler := handler.WithAttrs([]slog.Attr{slog.String(logComponentKey, logComponentValueSystem)})
+		systemLogger := slog.New(systemHandler)
+		c.baseSystem = chezmoi.NewDebugSystem(c.baseSystem, systemLogger)
 	}
 
 	// Set up the persistent state.
@@ -2037,13 +2030,8 @@ func (c *Config) persistentPreRunRootE(cmd *cobra.Command, args []string) error 
 		c.persistentState = chezmoi.NullPersistentState{}
 	}
 	if c.debug && c.persistentState != nil {
-		persistentStateLogger := c.logger.With().
-			Str(logComponentKey, logComponentValuePersistentState).
-			Logger()
-		c.persistentState = chezmoi.NewDebugPersistentState(
-			c.persistentState,
-			&persistentStateLogger,
-		)
+		persistentStateLogger := c.logger.With(slog.String(logComponentKey, logComponentValuePersistentState))
+		c.persistentState = chezmoi.NewDebugPersistentState(c.persistentState, persistentStateLogger)
 	}
 
 	// Set up the source and destination systems.
@@ -2278,39 +2266,27 @@ func (c *Config) newTemplateData(cmd *cobra.Command) *templateData {
 			if rawGroup, err := user.LookupGroupId(currentUser.Gid); err == nil {
 				group = rawGroup.Name
 			} else {
-				c.logger.Info().
-					Str("gid", currentUser.Gid).
-					Err(err).
-					Msg("user.LookupGroupId")
+				c.logger.Info("user.LookupGroupId", slog.String("err", err.Error()), slog.String("gid", currentUser.Gid))
 			}
 		}
 	} else {
-		c.logger.Info().
-			Err(err).
-			Msg("user.Current")
+		c.logger.Error("user.Current", slog.Any("err", err))
 		var ok bool
 		username, ok = os.LookupEnv("USER")
 		if !ok {
-			c.logger.Info().
-				Str("key", "USER").
-				Bool("ok", ok).
-				Msg("os.LookupEnv")
+			c.logger.Info("os.LookupEnv", slog.String("key", "USER"), slog.Bool("ok", ok))
 		}
 	}
 
 	fqdnHostname, err := chezmoi.FQDNHostname(c.fileSystem)
 	if err != nil {
-		c.logger.Info().
-			Err(err).
-			Msg("chezmoi.FQDNHostname")
+		c.logger.Info("chezmoi.FQDNHostname", slog.String("err", err.Error()))
 	}
 	hostname, _, _ := strings.Cut(fqdnHostname, ".")
 
 	kernel, err := chezmoi.Kernel(c.fileSystem)
 	if err != nil {
-		c.logger.Info().
-			Err(err).
-			Msg("chezmoi.Kernel")
+		c.logger.Info("chezmoi.Kernel", slog.String("err", err.Error()))
 	}
 
 	var osRelease map[string]any
@@ -2322,9 +2298,7 @@ func (c *Config) newTemplateData(cmd *cobra.Command) *templateData {
 		if rawOSRelease, err := chezmoi.OSRelease(c.fileSystem); err == nil {
 			osRelease = upperSnakeCaseToCamelCaseMap(rawOSRelease)
 		} else {
-			c.logger.Info().
-				Err(err).
-				Msg("chezmoi.OSRelease")
+			c.logger.Info("chezmoi.OSRelease", slog.String("err", err.Error()))
 		}
 	}
 
@@ -2467,10 +2441,8 @@ func (c *Config) setEncryption() error {
 	}
 
 	if c.debug {
-		encryptionLogger := c.logger.With().
-			Str(logComponentKey, logComponentValueEncryption).
-			Logger()
-		c.encryption = chezmoi.NewDebugEncryption(c.encryption, &encryptionLogger)
+		encryptionLogger := c.logger.With(logComponentKey, logComponentValueEncryption)
+		c.encryption = chezmoi.NewDebugEncryption(c.encryption, encryptionLogger)
 	}
 
 	return nil
@@ -2675,9 +2647,7 @@ func (c *Config) tempDir(key string) (chezmoi.AbsPath, error) {
 		return tempDirAbsPath, nil
 	}
 	tempDir, err := os.MkdirTemp("", key)
-	c.logger.Err(err).
-		Str("tempDir", tempDir).
-		Msg("MkdirTemp")
+	chezmoilog.InfoOrError(c.logger, "MkirTemp", err, slog.String("tempDir", tempDir))
 	if err != nil {
 		return chezmoi.EmptyAbsPath, err
 	}

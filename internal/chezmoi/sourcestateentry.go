@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"os/exec"
 
-	"github.com/rs/zerolog"
+	"golang.org/x/exp/slog"
 
 	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
 )
@@ -28,7 +28,7 @@ type SourceStateOriginAbsPath AbsPath
 
 // A SourceStateEntry represents the state of an entry in the source state.
 type SourceStateEntry interface {
-	zerolog.LogObjectMarshaler
+	slog.LogValuer
 	Evaluate() error
 	Order() ScriptOrder
 	Origin() SourceStateOrigin
@@ -84,11 +84,12 @@ func (s *SourceStateCommand) Evaluate() error {
 	return nil
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (s *SourceStateCommand) MarshalZerologObject(e *zerolog.Event) {
-	e.EmbedObject(chezmoilog.OSExecCmdLogObject{Cmd: s.cmd})
-	e.Str("origin", s.origin.OriginString())
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (s *SourceStateCommand) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Any("cmd", chezmoilog.OSExecCmdLogObject{Cmd: s.cmd}),
+		slog.String("origin", s.origin.OriginString()),
+	)
 }
 
 // Order returns s's order.
@@ -124,11 +125,12 @@ func (s *SourceStateDir) Evaluate() error {
 	return nil
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (s *SourceStateDir) MarshalZerologObject(e *zerolog.Event) {
-	e.Stringer("sourceRelPath", s.sourceRelPath)
-	e.Object("attr", s.Attr)
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (s *SourceStateDir) LogValue() slog.Value {
+	return slog.GroupValue(
+		chezmoilog.Stringer("sourceRelPath", s.sourceRelPath),
+		slog.Any("attr", s.Attr),
+	)
 }
 
 // Order returns s's order.
@@ -160,22 +162,23 @@ func (s *SourceStateFile) Evaluate() error {
 	return err
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (s *SourceStateFile) MarshalZerologObject(e *zerolog.Event) {
-	e.Stringer("sourceRelPath", s.sourceRelPath)
-	e.Interface("attr", s.Attr)
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (s *SourceStateFile) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		chezmoilog.Stringer("sourceRelPath", s.sourceRelPath),
+		slog.Any("attr", s.Attr),
+	}
 	contents, contentsErr := s.Contents()
-	e.Bytes("contents", chezmoilog.FirstFewBytes(contents))
+	attrs = append(attrs, slog.String("contents", string(chezmoilog.FirstFewBytes(contents))))
 	if contentsErr != nil {
-		e.Str("contentsErr", contentsErr.Error())
+		attrs = append(attrs, slog.Any("contentsErr", contentsErr))
 	}
-	e.Err(contentsErr)
 	contentsSHA256, contentsSHA256Err := s.ContentsSHA256()
-	e.Str("contentsSHA256", hex.EncodeToString(contentsSHA256))
+	attrs = append(attrs, slog.String("contentsSHA256", hex.EncodeToString(contentsSHA256)))
 	if contentsSHA256Err != nil {
-		e.Str("contentsSHA256Err", contentsSHA256Err.Error())
+		attrs = append(attrs, slog.Any("contentsSHA256Err", contentsSHA256Err))
 	}
+	return slog.GroupValue(attrs...)
 }
 
 // Order returns s's order.
@@ -213,9 +216,11 @@ func (s *SourceStateRemove) Evaluate() error {
 	return nil
 }
 
-// MarshalZerologObject implements zerolog.LogObjectMarshaler.
-func (s *SourceStateRemove) MarshalZerologObject(e *zerolog.Event) {
-	e.Stringer("targetRelPath", s.targetRelPath)
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (s *SourceStateRemove) LogValue() slog.Value {
+	return slog.GroupValue(
+		chezmoilog.Stringer("targetRelPath", s.targetRelPath),
+	)
 }
 
 // Order returns s's order.

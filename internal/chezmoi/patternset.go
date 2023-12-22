@@ -7,8 +7,8 @@ import (
 	"sort"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/rs/zerolog"
 	vfs "github.com/twpayne/go-vfs/v4"
+	"golang.org/x/exp/slog"
 )
 
 type patternSetIncludeType bool
@@ -40,14 +40,15 @@ func newPatternSet() *patternSet {
 	}
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (ps *patternSet) MarshalZerologObject(e *zerolog.Event) {
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (ps *patternSet) LogValue() slog.Value {
 	if ps == nil {
-		return
+		return slog.Value{}
 	}
-	e.Strs("includePatterns", ps.includePatterns.elements())
-	e.Strs("excludePatterns", ps.excludePatterns.elements())
+	return slog.GroupValue(
+		slog.Any("includePatterns", ps.includePatterns.elements()),
+		slog.Any("excludePatterns", ps.excludePatterns.elements()),
+	)
 }
 
 // add adds a pattern to ps.

@@ -3,91 +3,84 @@ package chezmoilog
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/exp/slices"
+	"golang.org/x/exp/slog"
 )
 
 const few = 64
 
 // An OSExecCmdLogObject wraps an *os/exec.Cmd and adds
-// github.com/rs/zerolog.LogObjectMarshaler functionality.
+// golang.org/x/exp/slog.LogValuer functionality.
 type OSExecCmdLogObject struct {
 	*exec.Cmd
 }
 
-// An OSExecExitErrorLogObject wraps an error and adds
-// github.com/rs/zerolog.LogObjectMarshaler functionality if the wrapped error
-// is an os/exec.ExitError.
+// An OSExecExitErrorLogObject wraps an *os/exec.ExitError and adds
+// golang.org/x/exp/slog.LogValuer.
 type OSExecExitErrorLogObject struct {
-	Err error
+	*exec.ExitError
 }
 
 // An OSProcessStateLogObject wraps an *os.ProcessState and adds
-// github.com/rs/zerolog.LogObjectMarshaler functionality.
+// golang.org/x/exp/slog.LogValuer functionality.
 type OSProcessStateLogObject struct {
 	*os.ProcessState
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (cmd OSExecCmdLogObject) MarshalZerologObject(event *zerolog.Event) {
-	if cmd.Cmd == nil {
-		return
-	}
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (cmd OSExecCmdLogObject) LogValuer() slog.Value {
+	var attrs []slog.Attr
 	if cmd.Path != "" {
-		event.Str("path", cmd.Path)
+		attrs = append(attrs, slog.String("path", cmd.Path))
 	}
-	if cmd.Args != nil {
-		event.Strs("args", cmd.Args)
+	if len(cmd.Args) != 0 {
+		attrs = append(attrs, slog.Any("args", cmd.Args))
 	}
 	if cmd.Dir != "" {
-		event.Str("dir", cmd.Dir)
+		attrs = append(attrs, slog.String("dir", cmd.Dir))
 	}
-	if cmd.Env != nil {
-		event.Strs("env", cmd.Env)
+	if len(cmd.Env) != 0 {
+		attrs = append(attrs, slog.Any("env", cmd.Env))
 	}
+	return slog.GroupValue(attrs...)
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (err OSExecExitErrorLogObject) MarshalZerologObject(event *zerolog.Event) {
-	if err.Err == nil {
-		return
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (err OSExecExitErrorLogObject) LogValuer() slog.Value {
+	attrs := []slog.Attr{
+		slog.Any("processState", OSProcessStateLogObject{err.ExitError.ProcessState}),
 	}
-	if osExecExitError := (&exec.ExitError{}); errors.As(err.Err, &osExecExitError) {
-		event.EmbedObject(OSProcessStateLogObject{osExecExitError.ProcessState})
-		if osExecExitError.Stderr != nil {
-			event.Bytes("stderr", osExecExitError.Stderr)
-			return
-		}
+	if osExecExitError := (&exec.ExitError{}); errors.As(err, &osExecExitError) {
+		attrs = append(attrs, slog.String("stderr", string(err.ExitError.Stderr)))
 	}
+	return slog.GroupValue(attrs...)
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (p OSProcessStateLogObject) MarshalZerologObject(event *zerolog.Event) {
-	if p.ProcessState == nil {
-		return
-	}
-	if p.Exited() {
-		if !p.Success() {
-			event.Int("exitCode", p.ExitCode())
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (p OSProcessStateLogObject) LogValue() slog.Value {
+	var attrs []slog.Attr
+	if p.ProcessState != nil {
+		if p.Exited() {
+			if !p.Success() {
+				attrs = append(attrs, slog.Int("exitCode", p.ExitCode()))
+			}
+		} else {
+			attrs = append(attrs, slog.Int("pid", p.Pid()))
 		}
-	} else {
-		event.Int("pid", p.Pid())
+		if userTime := p.UserTime(); userTime != 0 {
+			attrs = append(attrs, slog.Duration("userTime", userTime))
+		}
+		if systemTime := p.SystemTime(); systemTime != 0 {
+			attrs = append(attrs, slog.Duration("systemTime", systemTime))
+		}
 	}
-	if userTime := p.UserTime(); userTime != 0 {
-		event.Dur("userTime", userTime)
-	}
-	if systemTime := p.SystemTime(); systemTime != 0 {
-		event.Dur("systemTime", systemTime)
-	}
+	return slog.GroupValue(attrs...)
 }
 
 // FirstFewBytes returns the first few bytes of data in a human-readable form.
@@ -102,27 +95,29 @@ func FirstFewBytes(data []byte) []byte {
 // LogHTTPRequest calls httpClient.Do, logs the result to logger, and returns
 // the result.
 func LogHTTPRequest(
-	logger *zerolog.Logger,
+	logger *slog.Logger,
 	client *http.Client,
 	req *http.Request,
 ) (*http.Response, error) {
 	start := time.Now()
 	resp, err := client.Do(req)
+	args := []any{
+		slog.Duration("duration", time.Since(start)),
+		slog.String("method", req.Method),
+		Stringer("url", req.URL),
+	}
 	if resp != nil {
-		logger.Err(err).
-			Stringer("duration", time.Since(start)).
-			Str("method", req.Method).
-			Int64("size", resp.ContentLength).
-			Int("statusCode", resp.StatusCode).
-			Str("status", resp.Status).
-			Stringer("url", req.URL).
-			Msg("HTTPRequest")
+		args = append(args,
+			slog.Int("contentLength", int(resp.ContentLength)),
+			slog.String("status", resp.Status),
+			slog.Int("statusCode", resp.StatusCode),
+		)
+	}
+	if err != nil {
+		args = append(args, slog.Any("err", err))
+		logger.Error("HTTPRequest", args...)
 	} else {
-		logger.Err(err).
-			Stringer("duration", time.Since(start)).
-			Str("method", req.Method).
-			Stringer("url", req.URL).
-			Msg("HTTPRequest")
+		logger.Info("HTTPRequest", args...)
 	}
 	return resp, err
 }
@@ -131,13 +126,20 @@ func LogHTTPRequest(
 func LogCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
 	start := time.Now()
 	combinedOutput, err := cmd.CombinedOutput()
-	log.Err(err).
-		EmbedObject(OSExecCmdLogObject{Cmd: cmd}).
-		EmbedObject(OSExecExitErrorLogObject{Err: err}).
-		Bytes("combinedOutput", Output(combinedOutput, err)).
-		Stringer("duration", time.Since(start)).
-		Int("size", len(combinedOutput)).
-		Msg("CombinedOutput")
+	attrs := []any{
+		slog.Any("cmd", OSExecCmdLogObject{Cmd: cmd}),
+		slog.Duration("duration", time.Since(start)),
+		slog.Any("combinedOutput", Output(combinedOutput, err)),
+		slog.Int("size", len(combinedOutput)),
+	}
+	for _, attr := range AppendExitErrorAttrs(nil, err) {
+		attrs = append(attrs, attr)
+	}
+	if err != nil {
+		slog.Error("Output", attrs...)
+	} else {
+		slog.Info("Output", attrs...)
+	}
 	return combinedOutput, err
 }
 
@@ -145,13 +147,20 @@ func LogCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
 func LogCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 	start := time.Now()
 	output, err := cmd.Output()
-	log.Err(err).
-		EmbedObject(OSExecCmdLogObject{Cmd: cmd}).
-		EmbedObject(OSExecExitErrorLogObject{Err: err}).
-		Stringer("duration", time.Since(start)).
-		Bytes("output", Output(output, err)).
-		Int("size", len(output)).
-		Msg("Output")
+	attrs := []any{
+		slog.Any("cmd", OSExecCmdLogObject{Cmd: cmd}),
+		slog.Duration("duration", time.Since(start)),
+		slog.Any("output", Output(output, err)),
+		slog.Int("size", len(output)),
+	}
+	for _, attr := range AppendExitErrorAttrs(nil, err) {
+		attrs = append(attrs, attr)
+	}
+	if err != nil {
+		slog.Error("Output", attrs...)
+	} else {
+		slog.Info("Output", attrs...)
+	}
 	return output, err
 }
 
@@ -159,11 +168,18 @@ func LogCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 func LogCmdRun(cmd *exec.Cmd) error {
 	start := time.Now()
 	err := cmd.Run()
-	log.Err(err).
-		EmbedObject(OSExecCmdLogObject{Cmd: cmd}).
-		EmbedObject(OSExecExitErrorLogObject{Err: err}).
-		Stringer("duration", time.Since(start)).
-		Msg("Run")
+	attrs := []any{
+		slog.Any("cmd", OSExecCmdLogObject{Cmd: cmd}),
+		slog.Duration("duration", time.Since(start)),
+	}
+	for _, attr := range AppendExitErrorAttrs(nil, err) {
+		attrs = append(attrs, attr)
+	}
+	if err != nil {
+		slog.Error("Run", attrs...)
+	} else {
+		slog.Info("Run", attrs...)
+	}
 	return err
 }
 
@@ -171,11 +187,18 @@ func LogCmdRun(cmd *exec.Cmd) error {
 func LogCmdStart(cmd *exec.Cmd) error {
 	start := time.Now()
 	err := cmd.Start()
-	log.Err(err).
-		EmbedObject(OSExecCmdLogObject{Cmd: cmd}).
-		EmbedObject(OSExecExitErrorLogObject{Err: err}).
-		Time("start", start).
-		Msg("Start")
+	attrs := []any{
+		slog.Any("cmd", OSExecCmdLogObject{Cmd: cmd}),
+		slog.Time("start", start),
+	}
+	for _, attr := range AppendExitErrorAttrs(nil, err) {
+		attrs = append(attrs, attr)
+	}
+	if err != nil {
+		slog.Error("Start", attrs...)
+	} else {
+		slog.Info("Start", attrs...)
+	}
 	return err
 }
 
@@ -183,11 +206,18 @@ func LogCmdStart(cmd *exec.Cmd) error {
 func LogCmdWait(cmd *exec.Cmd) error {
 	err := cmd.Wait()
 	end := time.Now()
-	log.Err(err).
-		EmbedObject(OSExecCmdLogObject{Cmd: cmd}).
-		EmbedObject(OSExecExitErrorLogObject{Err: err}).
-		Time("end", end).
-		Msg("Wait")
+	attrs := []any{
+		slog.Any("cmd", OSExecCmdLogObject{Cmd: cmd}),
+		slog.Time("end", end),
+	}
+	for _, attr := range AppendExitErrorAttrs(nil, err) {
+		attrs = append(attrs, attr)
+	}
+	if err != nil {
+		slog.Error("Wait", attrs...)
+	} else {
+		slog.Info("Wait", attrs...)
+	}
 	return err
 }
 
@@ -198,4 +228,43 @@ func Output(data []byte, err error) []byte {
 		return data
 	}
 	return FirstFewBytes(data)
+}
+
+func InfoOrError(logger *slog.Logger, msg string, err error, args ...any) {
+	switch {
+	case logger == nil:
+		return
+	case err != nil:
+		logger.Error(msg, append([]any{"err", err}, args...)...)
+	default:
+		logger.Info(msg, args...)
+	}
+}
+
+// FIXME this should use []any
+func AppendExitErrorAttrs(attrs []slog.Attr, err error) []slog.Attr {
+	var execExitError *exec.ExitError
+	if !errors.As(err, &execExitError) {
+		return append(attrs, slog.Any("err", err))
+	}
+
+	if execExitError.ProcessState != nil {
+		if execExitError.Exited() {
+			attrs = append(attrs, slog.Int("exitCode", execExitError.ExitCode()))
+		} else {
+			attrs = append(attrs, slog.Int("pid", execExitError.Pid()))
+		}
+		if userTime := execExitError.UserTime(); userTime != 0 {
+			attrs = append(attrs, slog.Duration("userTime", userTime))
+		}
+		if systemTime := execExitError.SystemTime(); systemTime != 0 {
+			attrs = append(attrs, slog.Duration("systemTime", systemTime))
+		}
+	}
+
+	return attrs
+}
+
+func Stringer(key string, s fmt.Stringer) slog.Attr {
+	return slog.String(key, s.String())
 }

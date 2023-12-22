@@ -12,9 +12,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"go.etcd.io/bbolt"
+	"golang.org/x/exp/slog"
 
 	"github.com/twpayne/chezmoi/v2/assets/chezmoi.io/docs/reference/commands"
 	"github.com/twpayne/chezmoi/v2/internal/chezmoi"
@@ -97,13 +97,13 @@ func init() {
 	}
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (v VersionInfo) MarshalZerologObject(e *zerolog.Event) {
-	e.Str("version", v.Version)
-	e.Str("commit", v.Commit)
-	e.Str("date", v.Date)
-	e.Str("builtBy", v.BuiltBy)
+func (v VersionInfo) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("version", v.Version),
+		slog.String("commit", v.Commit),
+		slog.String("date", v.Date),
+		slog.String("builtBy", v.BuiltBy),
+	)
 }
 
 // Main runs chezmoi and returns an exit code.

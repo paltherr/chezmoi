@@ -22,6 +22,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/google/go-github/v57/github"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slog"
 
 	"github.com/twpayne/chezmoi/v2/internal/chezmoi"
 	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
@@ -133,10 +134,7 @@ func (c *Config) runUpgradeCmd(cmd *cobra.Command, args []string) error {
 			)
 		}
 	}
-	c.logger.Info().
-		Str("executable", c.upgrade.executable).
-		Str("method", method).
-		Msg("upgradeMethod")
+	c.logger.Info("upgradeMethod", slog.String("executable", c.upgrade.executable), slog.String("method", method))
 
 	// Replace the executable with the updated version.
 	switch method {

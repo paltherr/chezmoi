@@ -28,10 +28,9 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/mitchellh/copystructure"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
+	"golang.org/x/exp/slog"
 
 	"github.com/twpayne/chezmoi/v2/internal/chezmoierrors"
 	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
@@ -125,7 +124,7 @@ type SourceState struct {
 	remove                  *patternSet
 	interpreters            map[string]*Interpreter
 	httpClient              *http.Client
-	logger                  *zerolog.Logger
+	logger                  *slog.Logger
 	version                 semver.Version
 	mode                    Mode
 	defaultTemplateDataFunc func() map[string]any
@@ -196,7 +195,7 @@ func WithInterpreters(interpreters map[string]*Interpreter) SourceStateOption {
 }
 
 // WithLogger sets the logger.
-func WithLogger(logger *zerolog.Logger) SourceStateOption {
+func WithLogger(logger *slog.Logger) SourceStateOption {
 	return func(s *SourceState) {
 		s.logger = logger
 	}
@@ -292,7 +291,7 @@ func NewSourceState(options ...SourceStateOption) *SourceState {
 		ignore:               newPatternSet(),
 		remove:               newPatternSet(),
 		httpClient:           http.DefaultClient,
-		logger:               &log.Logger,
+		logger:               slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		readTemplateData:     true,
 		readTemplates:        true,
 		priorityTemplateData: make(map[string]any),

@@ -3,7 +3,7 @@ package chezmoi
 import (
 	"os/exec"
 
-	"github.com/rs/zerolog"
+	"golang.org/x/exp/slog"
 )
 
 // An Interpreter interprets scripts.
@@ -25,16 +25,14 @@ func (i *Interpreter) None() bool {
 	return i == nil || i.Command == ""
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (i *Interpreter) MarshalZerologObject(event *zerolog.Event) {
-	if i == nil {
-		return
-	}
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (i *Interpreter) LogValue() slog.Value {
+	var attrs []slog.Attr
 	if i.Command != "" {
-		event.Str("command", i.Command)
+		attrs = append(attrs, slog.String("command", i.Command))
 	}
 	if i.Args != nil {
-		event.Strs("args", i.Args)
+		attrs = append(attrs, slog.Any("args", i.Args))
 	}
+	return slog.GroupValue(attrs...)
 }

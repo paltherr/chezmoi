@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/rs/zerolog"
+	"golang.org/x/exp/slog"
 )
 
 // A SourceFileTargetType is a the type of a target represented by a file in the
@@ -99,15 +99,16 @@ func parseDirAttr(name string) DirAttr {
 	}
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.ObjectMarshaler.MarshalZerologObject.
-func (da DirAttr) MarshalZerologObject(e *zerolog.Event) {
-	e.Str("TargetName", da.TargetName)
-	e.Bool("Exact", da.Exact)
-	e.Bool("External", da.External)
-	e.Bool("Private", da.Private)
-	e.Bool("ReadOnly", da.ReadOnly)
-	e.Bool("Remove", da.Remove)
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (da DirAttr) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("TargetName", da.TargetName),
+		slog.Bool("Exact", da.Exact),
+		slog.Bool("External", da.External),
+		slog.Bool("Private", da.Private),
+		slog.Bool("ReadOnly", da.ReadOnly),
+		slog.Bool("Remove", da.Remove),
+	)
 }
 
 // SourceName returns da's source name.
@@ -246,19 +247,20 @@ func parseFileAttr(sourceName, encryptedSuffix string) FileAttr {
 	}
 }
 
-// MarshalZerologObject implements
-// github.com/rs/zerolog.LogObjectMarshaler.MarshalZerologObject.
-func (fa FileAttr) MarshalZerologObject(e *zerolog.Event) {
-	e.Str("TargetName", fa.TargetName)
-	e.Str("Type", sourceFileTypeStrs[fa.Type])
-	e.Str("Condition", string(fa.Condition))
-	e.Bool("Empty", fa.Empty)
-	e.Bool("Encrypted", fa.Encrypted)
-	e.Bool("Executable", fa.Executable)
-	e.Int("Order", int(fa.Order))
-	e.Bool("Private", fa.Private)
-	e.Bool("ReadOnly", fa.ReadOnly)
-	e.Bool("Template", fa.Template)
+// LogValue implements golang.org/x/exp/slog.LogValuer.
+func (fa FileAttr) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("TargetName", fa.TargetName),
+		slog.String("Type", sourceFileTypeStrs[fa.Type]),
+		slog.String("Condition", string(fa.Condition)),
+		slog.Bool("Empty", fa.Empty),
+		slog.Bool("Encrypted", fa.Encrypted),
+		slog.Bool("Executable", fa.Executable),
+		slog.Int("Order", int(fa.Order)),
+		slog.Bool("Private", fa.Private),
+		slog.Bool("ReadOnly", fa.ReadOnly),
+		slog.Bool("Template", fa.Template),
+	)
 }
 
 // SourceName returns fa's source name.
