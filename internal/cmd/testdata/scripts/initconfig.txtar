@@ -20,7 +20,13 @@ cmp $CHEZMOICONFIGDIR/chezmoi.yaml golden/chezmoi2.yaml
 # test that chezmoi init writes a config of a new format into the defaul config dir
 rm $CHEZMOISOURCEDIR/.chezmoi.yaml.tmpl
 cp golden/chezmoi3.toml $CHEZMOISOURCEDIR/.chezmoi.toml.tmpl
+ttyin golden/yes
 exec chezmoi init
+stdout 'format mismatch between config template and current config file: toml vs yaml'
+stdout '- config template    : '$CHEZMOISOURCEDIR'/.chezmoi.toml.tmpl'
+stdout '- current config file: '$CHEZMOICONFIGDIR'/chezmoi.yaml'
+stdout '- target config file : '$CHEZMOICONFIGDIR'/chezmoi.toml'
+stdout 'anyway \(over\)write target config file\?'
 cmp $CHEZMOICONFIGDIR/chezmoi.yaml golden/chezmoi2.yaml
 cmp $CHEZMOICONFIGDIR/chezmoi.toml golden/chezmoi3.toml
 
@@ -57,7 +63,13 @@ cmp $HOME/.chezmoi/athome.yaml golden/chezmoi2.yaml
 # test that chezmoi --config=path init writes a config of a new format into path
 rm $CHEZMOISOURCEDIR/.chezmoi.yaml.tmpl
 cp golden/chezmoi3.toml $CHEZMOISOURCEDIR/.chezmoi.toml.tmpl
+ttyin golden/yes
 exec chezmoi --config=$HOME/.chezmoi/athome.yaml init
+stdout 'format mismatch between config template and current config file: toml vs yaml'
+stdout '- config template    : '$CHEZMOISOURCEDIR'/.chezmoi.toml.tmpl'
+stdout '- current config file: '$HOME'/.chezmoi/athome.yaml'
+stdout '- target config file : '$HOME'/.chezmoi/athome.yaml'
+stdout 'anyway \(over\)write target config file\?'
 cmp $HOME/.chezmoi/athome.yaml golden/chezmoi3.toml
 
 # check that the last operation broke chezmoi
@@ -97,7 +109,13 @@ cmp $HOME/.chezmoi/athome.txt golden/chezmoi2.yaml
 # test that chezmoi --config=path --config-format=format init writes a config of a new format into path
 rm $CHEZMOISOURCEDIR/.chezmoi.yaml.tmpl
 cp golden/chezmoi3.toml $CHEZMOISOURCEDIR/.chezmoi.toml.tmpl
+ttyin golden/yes
 exec chezmoi --config=$HOME/.chezmoi/athome.txt --config-format=yaml init
+stdout 'format mismatch between config template and current config file: toml vs yaml'
+stdout '- config template    : '$CHEZMOISOURCEDIR'/.chezmoi.toml.tmpl'
+stdout '- current config file: '$HOME'/.chezmoi/athome.txt'
+stdout '- target config file : '$HOME'/.chezmoi/athome.txt'
+stdout 'anyway \(over\)write target config file\?'
 cmp $HOME/.chezmoi/athome.txt golden/chezmoi3.toml
 
 # check that the last operation broke chezmoi
@@ -133,3 +151,5 @@ chezmoi: multiple config files: $CHEZMOICONFIGDIR/chezmoi.toml and $CHEZMOICONFI
 chezmoi: invalid config: $HOME/.chezmoi/athome.yaml: yaml: unmarshal errors: line 1: cannot unmarshal !!seq into map[string]interface {}
 -- golden/error3.log --
 chezmoi: invalid config: $HOME/.chezmoi/athome.txt: yaml: unmarshal errors: line 1: cannot unmarshal !!seq into map[string]interface {}
+-- golden/yes --
+y

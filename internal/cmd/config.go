@@ -756,10 +756,43 @@ func (c *Config) createAndReloadConfigFile(cmd *cobra.Command) error {
 	// Write the config.
 	configPath := c.init.configPath
 	if c.init.configPath.Empty() {
+		var configFormat chezmoi.Format
 		if c.customConfigFileAbsPath.Empty() {
 			configPath = chezmoi.NewAbsPath(c.bds.ConfigHome).Join(chezmoiRelPath, configTemplate.targetRelPath)
+			if _, err := c.fileSystem.Stat(c.defaultConfigFileAbsPath.String()); errors.Is(err, fs.ErrNotExist) {
+				configFormat = configTemplate.format
+			} else {
+				configFormat, _ = chezmoi.FormatFromAbsPath(c.defaultConfigFileAbsPath)
+			}
 		} else {
 			configPath = c.customConfigFileAbsPath
+			if c.configFormat == "" {
+				configFormat, _ = chezmoi.FormatFromAbsPath(configPath)
+			} else {
+				configFormat = c.configFormat.Format()
+			}
+		}
+		if configFormat != configTemplate.format {
+			prompt := fmt.Sprintf(""+
+				"format mismatch between config template and current config file: %s vs %s\n"+
+				"- config template    : %s\n"+
+				"- current config file: %s\n"+
+				"- target config file : %s\n"+
+				"anyway (over)write target config file",
+				configTemplate.format.Name(), configFormat.Name(),
+				configTemplate.sourceAbsPath,
+				c.getConfigFileAbsPath(),
+				configPath)
+			switch choice, err := c.promptChoice(prompt, []string{"yes", "no"}); {
+			case err != nil:
+				return err
+			case choice == "yes":
+				break
+			case choice == "no":
+				return chezmoi.ExitCodeError(0)
+			default:
+				panic(choice + ": unexpected choice")
+			}
 		}
 	}
 	if err := chezmoi.MkdirAll(c.baseSystem, configPath.Dir(), fs.ModePerm); err != nil {
